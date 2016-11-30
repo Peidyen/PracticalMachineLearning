@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning CourseProject"
+author: "Mitchell Ronco"
+date: "November 27, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#Load the Required Libraries.
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(e1071)
+```
+
+### Human Activity Recognition
+#### Classification by Machine Learning.
+
+#####Six participants performed weight-lifting exercises as follows:  
+
+1.  exactly according to the specification (Class A)
+2.  throwing the elbows to the front (Class B)
+3.  lifting the dumbbell only halfway (Class C)
+4.  lowering the dumbbell only halfway (Class D)
+5.  throwing the hips to the front (Class E)
+
+
+#####Our goal is to use the training set of data to create a model which will predict the classe variable for the testing set of data.  The classe variable represents the method which was used to perform the exercise as detailed above.
+
+#####I chose Random Forest as the core method to apply.  Being an ensemble method it should be more robust than applying an indiviudal decision tree approach.
+
+```{r getDataSets, include=TRUE, echo=FALSE}
+#Load Training Data
+trainingData <- read.csv(file="pml-training.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=",", na.strings=c('NA','','#DIV/0!'))
+
+#Load Training Data
+testingData <- read.csv(file="pml-testing.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=",", na.strings=c('NA','','#DIV/0!'))
+
+#Treat Classe variable as factor
+trainingData$classe <- as.factor(trainingData$classe) 
+```
+
+First, we clean up the data by removing the NA values
+```{r CleanNAs, include=TRUE, echo=TRUE}
+#Clean-up the NAs in the trainingData set
+NAindex <- apply(trainingData,2,function(x) {sum(is.na(x))}) 
+trainingData <- trainingData[,which(NAindex == 0)]
+#Clean-up the NAs in the testingData set
+NAindex <- apply(testingData,2,function(x) {sum(is.na(x))}) 
+testingData <- testingData[,which(NAindex == 0)]
+```
+
+#####Apply Pre-processing to the dataset.
+```{r CleanUndesirableVariables, include=TRUE, echo=TRUE}
+#Preprocessing variables
+# good reference: http://rstudio-pubs-static.s3.amazonaws.com/22473_910f516b7db74712b035029bac65241c.html
+
+#Identify Numeric
+vNum <- which(lapply(trainingData, class) %in% "numeric")
+
+#Center and Scale the data
+preObj <-preProcess(trainingData[,vNum],method=c('center', 'scale'))
+trainSetSmall <- predict(preObj, trainingData[,vNum])
+trainSetSmall$classe <- trainingData$classe
+testSetSmall <-predict(preObj,testingData[,vNum])
+```
+
+
+```{r CleanNearZeroVariables, include=TRUE, echo=TRUE}
+# remove nearZero Variance variables
+nzv <- nearZeroVar(trainSetSmall,saveMetrics=TRUE)
+trainSetSmall <- trainSetSmall[,nzv$nzv==FALSE]
+nzv <- nearZeroVar(testSetSmall,saveMetrics=TRUE)
+testSetSmall <- testSetSmall[,nzv$nzv==FALSE]
+names(trainSetSmall)
+```
+The data set is full of empty values.  The code above pre-processes and adjusting for near zero variation variables.  We end up with a subset of 27 predictor variables, much more manageable than the original set.
+
+```{r CrossValidation, include=TRUE, echo=TRUE}
+set.seed(1415927)
+
+inTrain = createDataPartition(trainSetSmall$classe, p = .7, list=FALSE)
+training = trainSetSmall[inTrain,]
+crossValidation = trainSetSmall[-inTrain,]
+```
+We partition the data using 70 percent for training purposes, and the rest for cross validation testing.
+
+```{r TrainModel, include=TRUE, echo=TRUE}
+modelHAR <- train(classe ~., method="rf", data=training, trControl=trainControl(method='cv'), number=10, allowParallel=TRUE )
+```
+Next We create our model using the Random Forest Method (rf) and we set up cross validation using K-fold with 10 folds.
+
+```{r Accuracy, include=TRUE, echo=TRUE}
+trainingPred <- predict(modelHAR, training)
+confusionMatrix(trainingPred, training$classe)
+```
+##### Reviewing the Confusion Matrix of the Training set, we see some mis-classifications, particularly Bs being misclassified as As and Ds being mis-classified as Cs.
+
+
+#####Expected OUt-of-Sample-Error
+```{r CrossValidationPredict, include=TRUE, echo=TRUE}
+cvPred <- predict(modelHAR, crossValidation)
+confusionMatrix(cvPred, crossValidation$classe)
+```
+##### The confusion matrix for the Cross Validation Set.
+Using the same model, but on the cross-validation data, the expected out-of-sample error will correspond to the quantity: 1-accuracy in the cross-validation data.   Accuracy is:  0.9944 suggesting that our expected out-of-sample error will be roughly .016 or 1.6 percent.
+
+
+```{r printmodelHAR, include=TRUE, echo=TRUE}
+print(modelHAR)
+```
+#####Reviewing our model, we ended up using 27 predictors, using cross-validation in 10 folds.  The final model selected an mtry value of 2, meaning 2 variables would be randomly sampled at each split. 
+
+
+#### Our Final Prediction:
+Using our model, and using it on the test data, we get our final prediction:
+```{r PredictionResults, include=TRUE, echo=TRUE}
+testingPred <- predict(modelHAR, testSetSmall)
+testingPred
+```
+
+
+
+
+###### Original data provided by:  Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013. Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4RFDF5r4b
